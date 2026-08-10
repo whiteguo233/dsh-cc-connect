@@ -1,0 +1,6 @@
+github.com/chenhg5/cc-connect v1.3.4-0.20260807020412-3fc360ee6acc h1:LlnhH/I7fEiw6KR/W57ctaCOlW90urcHcJZj7q1J0o4=
+github.com/chenhg5/cc-connect v1.3.4-0.20260807020412-3fc360ee6acc/go.mod h1:cbHeo56C3UVCW/4TT+okEUnAnM222qM/XAPsVSIYSZU=
+github.com/gorilla/websocket v1.5.0 h1:PPwGk2jz7EePpoHN/+ClbZu8SPxiqlu12wZP/3sWmnc=
+github.com/gorilla/websocket v1.5.0/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
+github.com/robfig/cron/v3 v3.0.1 h1:WdRxkvbJztn8LMz/QEvLN5sBU+xKpSqwwUO1Pjr4qDs=
+github.com/robfig/cron/v3 v3.0.1/go.mod h1:eQICP3HwyT7UooqI/z+Ov+PtYAWygg1TEWWzGIFLtro=

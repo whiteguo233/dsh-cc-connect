@@ -1,0 +1,16 @@
+# Node
+node_modules/
+*.log
+
+# Build output — lib/ is committed (dsh plugin installs use the built bundle)
+lib/*.map
+
+# Go
+go/dsh.test
+go/dsh/dsh.test
+*.test
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

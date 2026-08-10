@@ -1,0 +1,9 @@
+# 组合插入片段：复制到 ~/.dsh/profiles/<profile>/cordis.patch.yml
+- insert:
+    - id: cc-connect
+      name: '@dsh-external/cc-connect'
+      config:
+        defaultProject: ''
+        defaultSessionKey: ''
+        managementUrl: ''
+        managementToken: ''
