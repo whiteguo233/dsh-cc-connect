@@ -44,6 +44,8 @@ go test -tags smoke ./dsh/ -run TestSmoke_RoundTrip -v   # 对真实 dsh web 的
 
 见仓库根 README「一、cc-connect 侧」；完整字段：`base_url` / `work_dir` / `agent_preset` / `model` / `timeout_mins`。
 
+**默认推荐富卡片模式**：`[display] card_mode = "rich"`（全局或 `[projects.display]` 按项目），体验最佳；不支持的平台自动回退 legacy。
+
 ## 已知限制
 
 - 需本机运行 `dsh web`；服务不可达时会话报错并给出启动提示。

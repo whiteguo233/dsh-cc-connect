@@ -67,6 +67,13 @@ import _ "github.com/dsh-external/dsh-cc-connect/go/dsh"
 
 ### 配置（config.toml）
 
+**推荐开全局富卡片模式**（Card 2.0，200ms 节流打字机 + 工具步骤/思考折叠；不支持的平台自动回退 legacy，无副作用）：
+
+```toml
+[display]
+  card_mode = "rich"   # 全局默认富卡片（只对支持的平台生效）
+```
+
 ```toml
 [[projects]]
   name = "dsh-proj"
@@ -87,6 +94,8 @@ import _ "github.com/dsh-external/dsh-cc-connect/go/dsh"
       app_id = "cli_xxx"
       app_secret = "xxx"
 ```
+
+> 只想单个项目开富卡片，把 `card_mode` 放进该项目的 `[projects.display]` 即可（项目级优先于全局）。
 
 **前置条件**：本机运行 `dsh web`（默认 127.0.0.1:3080）；会话以 `work_dir` 为 cwd 创建，自动续聊。详见 [`go/README.md`](./go/README.md)（含能力清单：流式、审批、AskUserQuestion、/stop、/model、/list、超时看门狗、doctor 检查、CC_PROJECT/CC_SESSION_KEY 注入）。
 
