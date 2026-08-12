@@ -146,14 +146,16 @@ type tokenUsage struct {
 	CacheWriteTokens int `json:"cacheWriteTokens"`
 }
 
-// sessionSummary mirrors SessionSummary from session.list.
+// sessionSummary mirrors SessionSummary from session.list. UpdatedAt is a
+// float64 on the wire (millisecond epoch, possibly fractional) — int64
+// unmarshalling fails on values like 1786465628680.5632.
 type sessionSummary struct {
-	SessionID   string `json:"sessionId"`
-	UpdatedAt   int64  `json:"updatedAt"`
-	Running     bool   `json:"running"`
-	Blank       bool   `json:"blank"`
-	Cwd         string `json:"cwd,omitempty"`
-	AgentPreset string `json:"agentPreset,omitempty"`
+	SessionID   string  `json:"sessionId"`
+	UpdatedAt   float64 `json:"updatedAt"`
+	Running     bool    `json:"running"`
+	Blank       bool    `json:"blank"`
+	Cwd         string  `json:"cwd,omitempty"`
+	AgentPreset string  `json:"agentPreset,omitempty"`
 	Projections *struct {
 		Values struct {
 			Title *string `json:"title"`
@@ -330,9 +332,16 @@ func (c *rpcClient) respond(ctx context.Context, rpcID string, value any) error 
 
 // openMux connects to /api/events.mux over WebSocket (the dsh webserver
 // requires an HTTP upgrade for the two event streams) and returns a channel
-// of parsed frames. The stream stays open until ctx is cancelled or the
-// server closes it; the returned channel is closed when the reader finishes.
-func (c *rpcClient) openMux(ctx context.Context) (<-chan muxFrame, error) {
+// of parsed frames for targetSessionID. The stream stays open until ctx is
+// cancelled or the server closes it; the returned channel is closed when the
+// reader finishes.
+//
+// The mux stream aggregates EVERY session on the server (including Web GUI
+// sessions), so frames are filtered to the target session at the socket
+// reader. Frames that must never be lost (turn/end, approval/question
+// requests, stream errors) are enqueued with priority when the channel is
+// full; other frames are dropped rather than stalling the socket reader.
+func (c *rpcClient) openMux(ctx context.Context, targetSessionID string) (<-chan muxFrame, error) {
 	u, err := url.Parse(c.baseURL + "/api/events.mux")
 	if err != nil {
 		return nil, fmt.Errorf("dsh: parse mux url: %w", err)
@@ -355,7 +364,7 @@ func (c *rpcClient) openMux(ctx context.Context) (<-chan muxFrame, error) {
 		return nil, fmt.Errorf("dsh: events.mux websocket: %w", err)
 	}
 
-	frames := make(chan muxFrame, 256)
+	frames := make(chan muxFrame, 1024)
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
@@ -382,10 +391,31 @@ func (c *rpcClient) openMux(ctx context.Context) (<-chan muxFrame, error) {
 				continue
 			}
 			frame.RPCID = sr.RPCID
+
+			// Drop frames belonging to other sessions early: the mux stream
+			// carries every session on the server, and a busy Web GUI would
+			// otherwise flood this session's channel (lost turn/end frames
+			// were the root cause of stuck turns after permission answers).
+			if frame.Type != "stream/error" && frame.SessionID != "" && frame.SessionID != targetSessionID {
+				continue
+			}
+
+			if criticalFrame(frame) {
+				// Never lose turn/end, approval/question requests, or
+				// stream errors — block until the consumer catches up.
+				select {
+				case frames <- frame:
+				case <-ctx.Done():
+					return
+				}
+				continue
+			}
 			select {
 			case frames <- frame:
 			default:
-				// Never block the socket reader; a slow engine consumer drops frames.
+				// Never block the socket reader; a slow engine consumer drops
+				// non-critical frames (turn/end is protected above, and the
+				// engine re-aggregates text from its own accumulators).
 				slog.Warn("dsh: mux frame channel full, dropping frame", "type", frame.Type)
 			}
 		}
@@ -419,4 +449,20 @@ func parseBaseURL(raw string) (string, error) {
 		return "", fmt.Errorf("dsh: invalid base_url %q: missing host", raw)
 	}
 	return strings.TrimRight(u.String(), "/"), nil
+}
+
+// criticalFrame reports whether a frame must survive channel overflow:
+// turn/end (the engine's turn-completion signal), approval/question requests
+// (answerable interactions), and stream errors.
+func criticalFrame(f muxFrame) bool {
+	switch f.Type {
+	case "approval/requested", "question/requested", "stream/error":
+		return true
+	case "session/event":
+		var ev sessionEvent
+		if json.Unmarshal(f.Event, &ev) == nil && ev.Type == "turn/end" {
+			return true
+		}
+	}
+	return false
 }

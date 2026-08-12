@@ -323,7 +323,7 @@ func (m *mockDshServer) handleMux(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	ch := make(chan mockFrame, 64)
+	ch := make(chan mockFrame, 4096)
 	m.mu.Lock()
 	m.subs[ch] = struct{}{}
 	replay := append([]mockFrame(nil), m.frames...)

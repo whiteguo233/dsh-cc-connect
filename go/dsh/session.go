@@ -103,7 +103,7 @@ func newDshSession(ctx context.Context, client *rpcClient, workDir, sessionID, a
 		timeout:          timeout,
 		ctx:              sessCtx,
 		cancel:           cancel,
-		events:           make(chan core.Event, 256),
+		events:           make(chan core.Event, 1024),
 		readerDone:       make(chan struct{}),
 		pendingApprovals: make(map[string]pendingApproval),
 		pendingQuestions: make(map[string]pendingQuestion),
@@ -120,8 +120,9 @@ func newDshSession(ctx context.Context, client *rpcClient, workDir, sessionID, a
 		s.envBlock = block
 	}
 
-	// Open the aggregated stream and start filtering frames for this session.
-	frames, err := client.openMux(sessCtx)
+	// Open the aggregated stream; the reader filters to this session and
+	// protects critical frames (turn/end, approvals, questions) from loss.
+	frames, err := client.openMux(sessCtx, created.SessionID)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("dsh: open event stream: %w", err)
@@ -651,10 +652,28 @@ func (s *dshSession) handleQuestionRequested(f muxFrame) {
 
 // ── helpers ─────────────────────────────────────────────────────
 
+// emit delivers one event to the engine. Critical events (turn completion,
+// permission/question requests, errors) block until the engine consumes them
+// — losing one would leave the engine stuck on a turn. Non-critical events
+// (text/thinking/tool deltas) are dropped when the channel is full: the
+// engine accumulates text from what it receives and a stuck permission wait
+// must not stall the socket reader into losing the turn/end frame.
 func (s *dshSession) emit(evt core.Event) {
+	critical := evt.Type == core.EventResult ||
+		evt.Type == core.EventPermissionRequest ||
+		evt.Type == core.EventError
+	if critical {
+		select {
+		case s.events <- evt:
+		case <-s.ctx.Done():
+		}
+		return
+	}
 	select {
 	case s.events <- evt:
 	case <-s.ctx.Done():
+	default:
+		slog.Debug("dsh: dropping non-critical event (engine busy)", "type", evt.Type)
 	}
 }
 

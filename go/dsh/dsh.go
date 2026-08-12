@@ -155,7 +155,7 @@ func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, erro
 		}
 		info := core.AgentSessionInfo{
 			ID:         s.SessionID,
-			ModifiedAt: time.UnixMilli(s.UpdatedAt),
+			ModifiedAt: time.UnixMilli(int64(s.UpdatedAt)),
 		}
 		if s.Projections != nil && s.Projections.Values.Title != nil {
 			info.Summary = truncate(*s.Projections.Values.Title, 60)

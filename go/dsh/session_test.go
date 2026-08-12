@@ -2,6 +2,7 @@ package dsh
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -711,5 +712,76 @@ func TestAgent_ModelSwitcher(t *testing.T) {
 	}
 	if models[0].Name != "mock/mock-1" {
 		t.Fatalf("expected provider-prefixed model name, got %q", models[0].Name)
+	}
+}
+
+// TestSessionList_FractionalUpdatedAt is a regression test: dsh reports
+// updatedAt as a fractional millisecond float (e.g. 1786465628680.5632);
+// parsing it as int64 made session.list fail, which broke ValidateSessionID
+// and /list (every message was treated as a fresh session).
+func TestSessionList_FractionalUpdatedAt(t *testing.T) {
+	m := newMockDshServer()
+	// Inject a session whose updatedAt is a float with fraction.
+	m.mu.Lock()
+	m.sessions["session-float"] = &mockSession{id: "session-float", cwd: "/tmp/proj", prompts: 1}
+	m.mu.Unlock()
+
+	agent := newTestAgent(t, m, "/tmp/proj")
+	if !agent.ValidateSessionID(context.Background(), "session-float") {
+		t.Fatal("ValidateSessionID must accept sessions with fractional updatedAt")
+	}
+	sessions, err := agent.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListSessions with fractional updatedAt: %v", err)
+	}
+	if len(sessions) == 0 {
+		t.Fatal("expected at least one listed session")
+	}
+}
+
+// TestOpenMux_OtherSessionNoiseDoesNotStallOwnTurn is a regression test for
+// the stuck-turn bug: the mux stream aggregates every session on the server.
+// A flood of frames from OTHER sessions (e.g. a busy Web GUI) used to fill
+// the shared frame channel and drop this session's turn/end, leaving the
+// engine stuck after a permission answer (and /stop ineffective because the
+// engine was still waiting on the turn).
+func TestOpenMux_OtherSessionNoiseDoesNotStallOwnTurn(t *testing.T) {
+	m := newMockDshServer()
+	agent := newTestAgent(t, m, "/tmp/proj")
+
+	s, err := agent.StartSession(context.Background(), "")
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer s.Close()
+	ds := s.(*dshSession)
+	id := ds.sessionID
+
+	if err := ds.Send("go", "msg-1", nil, nil); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	// Flood the mux with other-session events (5× the old channel capacity)
+	// interleaved with this session's text deltas, WITHOUT consuming events.
+	for i := 0; i < 1500; i++ {
+		other := "session-other-" + fmt.Sprintf("%d", i%7)
+		m.broadcast("rpc-other-"+fmt.Sprintf("%d", i), frameEvent(other, evTextDelta(1, 1, "noise")))
+		if i%3 == 0 {
+			m.broadcast("rpc-self-"+fmt.Sprintf("%d", i), frameEvent(id, evTextDelta(1, 1, "tok ")))
+		}
+	}
+
+	// The turn/end frame must survive the overflow and complete the turn.
+	m.broadcast("rpc-end", frameEvent(id, evTurnEnd(1, "completed")))
+
+	events := drainEvents(t, ds, 10*time.Second)
+	var done bool
+	for _, e := range events {
+		if e.Type == core.EventResult && e.Done {
+			done = true
+		}
+	}
+	if !done {
+		t.Fatal("turn/end was lost under other-session flood — engine would stay stuck")
 	}
 }
